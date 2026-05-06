@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Note App</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ["Inter", "sans-serif"] },
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 text-slate-900 p-4 md:p-8">
+
+    <!-- Khu vực chứa giao diện chính -->
+    <div class="max-w-4xl mx-auto">
+        
+        <!-- Tiêu đề App -->
+        <div class="flex items-center justify-between mb-8">
+            <h1 class="text-3xl font-bold text-blue-600 flex items-center gap-2">
+                <i class="fa-solid fa-bolt"></i> Note App
+            </h1>
+            <!-- Nút đăng nhập -->
+            <div id="auth-container">
+                <button id="login-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-medium transition-all shadow-md">
+                    <i class="fa-brands fa-google mr-2"></i> Đăng nhập Google
+                </button>
+            </div>
+        </div>
+
+        <!-- Khu vực tương tác chính của App: Nhập và hiển thị danh sách note -->
+        <div class="relative bg-white/80 backdrop-blur-xl p-6 md:p-8 rounded-[2rem] shadow-2xl border border-white/50 mb-8 overflow-hidden transition-all duration-500 hover:shadow-blue-500/10">
+            
+            <!-- Ngăn chặn thao tác và làm mờ nội dung khi chưa xác thực -->
+            <div id="login-overlay" class="absolute inset-0 bg-slate-50/60 backdrop-blur-md z-10 flex flex-col items-center justify-center transition-opacity duration-300">
+                <div class="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 text-center animate-bounce-slow">
+                    <i class="fa-solid fa-lock text-3xl text-blue-400 mb-3"></i>
+                    <p class="text-slate-700 font-medium text-lg">Bạn cần đăng nhập để tạo note</p>
+                </div>
+            </div>
+
+            <div class="relative group flex items-center bg-white/90 backdrop-blur-sm border-2 border-slate-100 rounded-full shadow-lg hover:shadow-xl focus-within:border-blue-500 focus-within:shadow-blue-500/20 focus-within:ring-4 focus-within:ring-blue-50 transition-all duration-300 p-2 mb-10 z-0">
+                
+                <div class="pl-6 pr-2 text-blue-500">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                </div>
+
+                <input type="text" id="note-input" placeholder="Lưu giữ suy nghĩ của bạn..." class="flex-1 bg-transparent border-none outline-none text-slate-800 placeholder:text-slate-400 text-lg py-3 w-full">
+                
+                <button id="add-note-btn" class="bg-slate-900 hover:bg-blue-600 text-white rounded-full px-8 py-3.5 font-semibold transition-all duration-300 transform active:scale-95 shadow-md flex items-center gap-2">
+                    <span class="hidden sm:inline">Thêm Note</span>
+                    <i class="fa-solid fa-paper-plane text-sm transition-transform duration-300 group-hover:translate-x-1 group-hover:-translate-y-1"></i>
+                </button>
+            </div>
+
+            <!-- Vùng chứa danh sách dữ liệu được đổ về từ Backend -->
+            <div id="notes-list" class="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-8 relative z-0">
+            </div>
+            
+        </div>
+        
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+
+        import { firebaseClient } from './firebase_client.js';
+
+        const app = initializeApp(firebaseClient);
+        const auth = getAuth(app);
+        const provider = new GoogleAuthProvider();
+
+        // Chuyển đổi giữa link Codespaces và localhost
+        const API_BASE_URL = "http://127.0.0.1:8000"; 
+        // const API_BASE_URL = "https://your-codespace-link-8000.app.github.dev";
+
+        const authContainer = document.getElementById('auth-container');
+        const loginBtn = document.getElementById('login-btn');
+        const loginOverlay = document.getElementById('login-overlay'); 
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                if (loginOverlay) loginOverlay.classList.add('hidden');
+
+                authContainer.innerHTML = `
+                    <div class="flex items-center gap-4">
+                        <div class="text-right hidden sm:block">
+                            <p class="text-sm font-semibold text-slate-900">${user.displayName}</p>
+                            <p class="text-xs text-slate-500">${user.email}</p>
+                        </div>
+                        <img src="${user.photoURL}" alt="Avatar" class="w-10 h-10 rounded-full border-2 border-white shadow-sm">
+                        <button id="logout-btn" class="text-slate-400 hover:text-red-500 transition-colors ml-2" title="Đăng xuất">
+                            <i class="fa-solid fa-right-from-bracket text-xl"></i>
+                        </button>
+                    </div>
+                `;
+                
+                document.getElementById('logout-btn').addEventListener('click', () => {
+                    signOut(auth);
+                });
+
+                window.currentUser = user;
+                loadNotes();
+                
+            } else {
+                if (loginOverlay) loginOverlay.classList.remove('hidden');
+
+                authContainer.innerHTML = `
+                    <button id="login-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-medium transition-all shadow-md">
+                        <i class="fa-brands fa-google mr-2"></i> Đăng nhập Google
+                    </button>
+                `;
+                
+                document.getElementById('login-btn').addEventListener('click', () => {
+                    signInWithPopup(auth, provider).catch(err => {
+                        console.error("Lỗi đăng nhập:", err);
+                        alert("Đăng nhập thất bại, vui lòng thử lại!");
+                    });
+                });
+                
+                window.currentUser = null;
+                notesList.innerHTML = '';
+            }
+        });
+        
+        if(loginBtn) {
+            loginBtn.addEventListener('click', () => {
+                signInWithPopup(auth, provider).catch(err => console.error(err));
+            });
+        }
+
+        const noteInput = document.getElementById('note-input');
+        const addNoteBtn = document.getElementById('add-note-btn');
+
+        addNoteBtn.addEventListener('click', async () => {
+            const text = noteInput.value.trim();
+            
+            if (!text) {
+                alert("Bạn chưa nhập nội dung!");
+                return;
+            }
+            if (!window.currentUser) {
+                alert("Vui lòng đăng nhập trước khi tạo note!");
+                return;
+            }
+
+            addNoteBtn.disabled = true;
+            const originalBtnContent = addNoteBtn.innerHTML;
+            addNoteBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/notes`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        user_email: window.currentUser.email,
+                        content: text
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    noteInput.value = "";
+                    loadNotes();
+                } else {
+                    alert("Lỗi từ server: " + (data.detail || "Không xác định"));
+                }
+            } catch (error) {
+                console.error("Lỗi kết nối Backend:", error);
+                alert("Không thể kết nối! Hãy chắc chắn Server FastAPI (cổng 8000) đang chạy và Port đã được set Public.");
+            } finally {
+                addNoteBtn.disabled = false;
+                addNoteBtn.innerHTML = originalBtnContent;
+            }
+        });
+
+        noteInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                addNoteBtn.click();
+            }
+        });
+
+        const notesList = document.getElementById('notes-list');
+
+        window.deleteNote = async function(noteId) {
+            if (!confirm("Bạn có chắc chắn muốn xóa ghi chú này không?")) return;
+
+            try {
+                const apiUrl = `${API_BASE_URL}/notes/${noteId}`;
+                const response = await fetch(apiUrl, { method: "DELETE" });
+                
+                if (response.ok) {
+                    loadNotes();
+                } else {
+                    const data = await response.json();
+                    alert("Lỗi khi xóa: " + (data.detail || "Không xác định"));
+                }
+            } catch (error) {
+                console.error("Lỗi xóa note:", error);
+                alert("Mất kết nối máy chủ! Vui lòng kiểm tra lại Backend.");
+            }
+        };
+
+        async function loadNotes() {
+            if (!window.currentUser) return;
+
+            notesList.innerHTML = `
+                <div class="col-span-full text-center text-slate-400 py-10">
+                    <i class="fa-solid fa-spinner fa-spin text-3xl mb-3 text-blue-500"></i>
+                    <p class="font-medium">Đang đồng bộ dữ liệu...</p>
+                </div>`;
+
+            try {
+                const apiUrl = `${API_BASE_URL}/notes?email=${window.currentUser.email}`;
+                const response = await fetch(apiUrl);
+                const result = await response.json();
+
+                if (response.ok && result.data) {
+                    if (result.data.length === 0) {
+                        notesList.innerHTML = `
+                            <div class="col-span-full text-center py-12 px-4 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/50">
+                                <i class="fa-regular fa-folder-open text-4xl mb-3 text-slate-300"></i>
+                                <p class="text-slate-500 font-medium text-lg">Không gian tĩnh lặng quá.</p>
+                                <p class="text-slate-400 text-sm mt-1">Hãy viết suy nghĩ đầu tiên của bạn lên phía trên nhé!</p>
+                            </div>`;
+                        return;
+                    }
+
+                    let html = '';
+                    result.data.forEach(note => {
+                        const dateObj = new Date(note.created_at);
+                        const dateStr = dateObj.toLocaleDateString('vi-VN') + ' - ' + dateObj.toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'});
+
+                        html += `
+                            <div class="bg-gradient-to-br from-white to-slate-50 p-6 rounded-3xl shadow-sm border border-slate-100 hover:shadow-lg transition-all duration-300 relative group transform hover:-translate-y-1">
+                                <div class="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-blue-400 to-indigo-500 rounded-l-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                                <p class="text-slate-700 text-lg mb-4 whitespace-pre-wrap leading-relaxed">${note.content}</p>
+                                <div class="flex items-center justify-between text-xs font-medium text-slate-400">
+                                    <div class="flex items-center gap-2">
+                                        <i class="fa-regular fa-clock"></i>
+                                        <span>${dateStr}</span>
+                                    </div>
+                                    <button onclick="deleteNote('${note.id}')" class="opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all cursor-pointer" title="Xóa ghi chú này">
+                                        <i class="fa-regular fa-trash-can"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    notesList.innerHTML = html;
+                }
+            } catch (error) {
+                console.error("Lỗi đồng bộ notes:", error);
+                notesList.innerHTML = '<div class="col-span-full text-center text-red-500 py-4 bg-red-50 rounded-xl">Mất kết nối máy chủ dữ liệu!</div>';
+            }
+        }
+    </script>
+</body>
+</html>
